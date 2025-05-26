@@ -4,9 +4,12 @@ class AVIPlayer {
 
     let videoDecoder: IDF.JPEG.Decoder<UInt16>
     let videoBuffer: UnsafeMutableBufferPointer<UInt16>
+    let audioDecoder: esp_audio_dec_handle_t
+
     private var videoDataCallback: ((UnsafeMutableBufferPointer<UInt16>, Size) -> Void)? = nil
-    private var audioDataCallback: ((UnsafeMutableRawBufferPointer, audio_frame_format) -> Void)? = nil
+    private var audioDataCallback: ((UnsafeMutableRawBufferPointer) -> Void)? = nil
     private var audioSetClockCallback: ((_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void)? = nil
+    var pcmBuffer: UnsafeMutableRawBufferPointer
 
     init() throws(IDF.Error) {
         self.videoDecoder = try IDF.JPEG.createDecoderRgb565(rgbElementOrder: .bgr, rgbConversion: .bt709)
@@ -14,6 +17,16 @@ class AVIPlayer {
             throw IDF.Error(ESP_ERR_NO_MEM)
         }
         self.videoBuffer = videoBuffer
+
+        esp_mp3_dec_register()
+        var decoderConfig = esp_audio_dec_cfg_t()
+        decoderConfig.type = ESP_AUDIO_TYPE_MP3
+        var audioDecoder: esp_audio_dec_handle_t?
+        if esp_audio_dec_open(&decoderConfig, &audioDecoder) != ESP_AUDIO_ERR_OK {
+            throw IDF.Error(ESP_FAIL)
+        }
+        self.audioDecoder = audioDecoder!
+        pcmBuffer = Memory.allocateRaw(size: 32 * 1024, capability: .spiram)!
 
         var config = avi_player_config_t()
         config.buffer_size = 4192 * 1024
@@ -56,17 +69,40 @@ class AVIPlayer {
         guard let callback = audioDataCallback else {
             return
         }
-        let audioBuffer = UnsafeMutableRawBufferPointer(
-            start: data.pointee.data,
-            count: data.pointee.data_bytes
-        )
-        callback(audioBuffer, data.pointee.audio_info.format)
+        if data.pointee.audio_info.format == FORMAT_MP3 {
+            var input = esp_audio_dec_in_raw_t()
+            input.buffer = data.pointee.data
+            input.len = UInt32(data.pointee.data_bytes)
+            input.frame_recover = ESP_AUDIO_DEC_RECOVERY_PLC
+            var output = esp_audio_dec_out_frame_t()
+            output.buffer = pcmBuffer.assumingMemoryBound(to: UInt8.self).baseAddress!
+            output.len = UInt32(pcmBuffer.count)
+
+            let err = esp_audio_dec_process(audioDecoder, &input, &output)
+            if err != ESP_AUDIO_ERR_OK {
+                Log.error("Audio decode error: \(err)")
+                return
+            }
+
+            let audioBuffer = UnsafeMutableRawBufferPointer(
+                start: pcmBuffer.baseAddress!,
+                count: Int(output.decoded_size)
+            )
+            callback(audioBuffer)
+            return
+        } else {
+            let audioBuffer = UnsafeMutableRawBufferPointer(
+                start: data.pointee.data,
+                count: data.pointee.data_bytes
+            )
+            callback(audioBuffer)
+        }
     }
 
     func onVideoData(_ callback: @escaping (UnsafeMutableBufferPointer<UInt16>, Size) -> Void) {
         self.videoDataCallback = callback
     }
-    func onAudioData(_ callback: @escaping (UnsafeMutableRawBufferPointer, audio_frame_format) -> Void) {
+    func onAudioData(_ callback: @escaping (UnsafeMutableRawBufferPointer) -> Void) {
         self.audioDataCallback = callback
     }
     func onAudioSetClock(_ callback: @escaping (_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void) {

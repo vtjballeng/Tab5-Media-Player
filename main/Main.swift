@@ -33,13 +33,8 @@ func main() throws(IDF.Error) {
     aviPlayer.onVideoData { buffer, size in
         tab5.display.drawBitmap(start: (0, 0), end: (Int32(size.width), Int32(size.height)), data: buffer.baseAddress!)
     }
-    aviPlayer.onAudioData { (buffer, format) in
-        switch format {
-        case FORMAT_MP3:
-            Log.info("Audio Format: MP3")
-        default:
-            try! tab5.audio.write(buffer)
-        }
+    aviPlayer.onAudioData { buffer in
+        try! tab5.audio.write(buffer)
     }
     aviPlayer.onAudioSetClock { sampleRate, bitsPerSample, channels in
         Log.info("Audio Clock: \(sampleRate)Hz, \(bitsPerSample)-bit, \(channels) channels")

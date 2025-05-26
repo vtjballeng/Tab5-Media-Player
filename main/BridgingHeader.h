@@ -12,3 +12,5 @@
 
 // AVI Player
 #include "avi_player.h"
+#include "esp_audio_dec_default.h"
+#include "esp_audio_dec.h"
