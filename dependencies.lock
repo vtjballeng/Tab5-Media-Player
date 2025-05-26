@@ -45,6 +45,20 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.3
+  espressif/usb_host_msc:
+    component_hash: efbf44743b0f1f1f808697a671064531ae4661ccbce84632637261f8f670b375
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    version: 1.1.3
   idf:
     source:
       type: idf
@@ -53,7 +67,8 @@ direct_dependencies:
 - espressif/esp_codec_dev
 - espressif/esp_lcd_ili9881c
 - espressif/esp_lcd_touch_gt911
+- espressif/usb_host_msc
 - idf
-manifest_hash: 8ccb0c836c542bd2772053a8e78f79e56eef96afa8b766151e23e0059c753108
+manifest_hash: 015ea64fcf74d336bf3ab61a93ddcd784c9bd6ab53d39a30503012c4ff53587e
 target: esp32p4
 version: 2.0.0

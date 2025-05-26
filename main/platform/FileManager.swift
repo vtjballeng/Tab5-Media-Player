@@ -11,10 +11,7 @@ class FileManager {
         var entry = readdir(dir)
         while entry != nil {
             let name = entry!.pointee.dName
-            // if name != "." && name != ".." {
-            //     entries.append(name)
-            // }
-            if name.starts(with: "IMAGE") {
+            if !name.starts(with: ".") {
                 entries.append(name)
             }
             entry = readdir(dir)
