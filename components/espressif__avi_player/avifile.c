@@ -123,7 +123,15 @@ static int strl_parser(avi_typedef *AVI_file, const uint8_t *buffer, uint32_t le
     } else if (AUDS_ID == strh->fourcc_type) {
         ESP_LOGI(TAG, "Find a audio stream");
         AVI_AUDS_STRF_CHUNK *strf = (AVI_AUDS_STRF_CHUNK*)pdata;
-        if (strf->FourCC != STRF_ID || (strf->size + 8 != sizeof(AVI_AUDS_STRF_CHUNK) && strf->size + 10 != sizeof(AVI_AUDS_STRF_CHUNK))) {
+        if (0x01 == strf->format_tag) {
+            AVI_file->auds_format = FORMAT_PCM;
+        } else if (0x55 == strf->format_tag) {
+            AVI_file->auds_format = FORMAT_MP3;
+        } else {
+            ESP_LOGE(TAG, "only support pcm\\mp3 decoder, but needed is 0x%"PRIx16"", strf->format_tag);
+            return -1;
+        }
+        if (strf->FourCC != STRF_ID) {
             ESP_LOGE(TAG, "FourCC=0x%"PRIx32"|%"PRIx32", size=%"PRIu32"|%d", strf->FourCC, STRF_ID, strf->size, sizeof(AVI_AUDS_STRF_CHUNK));
             return -5;
         }
@@ -140,6 +148,7 @@ static int strl_parser(avi_typedef *AVI_file, const uint8_t *buffer, uint32_t le
         AVI_file->auds_channels = strf->channels;
         AVI_file->auds_sample_rate = strf->samples_per_sec;
         AVI_file->auds_bits = strf->bits_per_sample;
+        if (!AVI_file->auds_bits) AVI_file->auds_bits = 16; // mp3 does not have bits_per_sample
         pdata += sizeof(AVI_AUDS_STRF_CHUNK);
     } else {
         ESP_LOGW(TAG, "Unsupported stream 0x%"PRIu32"", strh->fourcc_type);

@@ -55,6 +55,7 @@ typedef struct {
     uint16_t auds_channels;
     uint16_t auds_sample_rate;
     uint16_t auds_bits;
+    audio_frame_format auds_format;
 } avi_typedef;
 
 /**

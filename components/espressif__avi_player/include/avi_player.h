@@ -38,6 +38,7 @@ typedef struct {
  */
 typedef enum  {
     FORMAT_PCM = 0,
+    FORMAT_MP3,
 } audio_frame_format;
 
 /**

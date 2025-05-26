@@ -5,7 +5,7 @@ class AVIPlayer {
     let videoDecoder: IDF.JPEG.Decoder<UInt16>
     let videoBuffer: UnsafeMutableBufferPointer<UInt16>
     private var videoDataCallback: ((UnsafeMutableBufferPointer<UInt16>, Size) -> Void)? = nil
-    private var audioDataCallback: ((UnsafeMutableRawBufferPointer) -> Void)? = nil
+    private var audioDataCallback: ((UnsafeMutableRawBufferPointer, audio_frame_format) -> Void)? = nil
     private var audioSetClockCallback: ((_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void)? = nil
 
     init() throws(IDF.Error) {
@@ -60,13 +60,13 @@ class AVIPlayer {
             start: data.pointee.data,
             count: data.pointee.data_bytes
         )
-        callback(audioBuffer)
+        callback(audioBuffer, data.pointee.audio_info.format)
     }
 
     func onVideoData(_ callback: @escaping (UnsafeMutableBufferPointer<UInt16>, Size) -> Void) {
         self.videoDataCallback = callback
     }
-    func onAudioData(_ callback: @escaping (UnsafeMutableRawBufferPointer) -> Void) {
+    func onAudioData(_ callback: @escaping (UnsafeMutableRawBufferPointer, audio_frame_format) -> Void) {
         self.audioDataCallback = callback
     }
     func onAudioSetClock(_ callback: @escaping (_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void) {

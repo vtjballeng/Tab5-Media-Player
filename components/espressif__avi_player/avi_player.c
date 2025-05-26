@@ -203,7 +203,7 @@ static esp_err_t avi_player(void)
                         .audio_info.channel = s_avi->avi_data.AVI_file.auds_channels,
                         .audio_info.bits_per_sample = s_avi->avi_data.AVI_file.auds_bits,
                         .audio_info.sample_rate = s_avi->avi_data.AVI_file.auds_sample_rate,
-                        .audio_info.format = FORMAT_PCM,
+                        .audio_info.format = s_avi->avi_data.AVI_file.auds_format,
                     };
                     s_avi->config.audio_cb(&data, s_avi->config.user_data);
                 }
