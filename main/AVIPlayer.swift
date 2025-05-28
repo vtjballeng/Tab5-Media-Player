@@ -127,4 +127,10 @@ class AVIPlayer {
         try IDF.Error.check(err)
         isPlaying = true
     }
+
+    func stop() throws(IDF.Error) {
+        guard isPlaying else { return }
+        isPlaying = false
+        try IDF.Error.check(avi_player_play_stop())
+    }
 }

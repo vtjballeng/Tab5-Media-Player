@@ -133,6 +133,7 @@ class M5StackTab5 {
         private let io: esp_lcd_panel_io_handle_t
         let panel: esp_lcd_panel_handle_t
         let size: Size
+        let semaphore = Semaphore.createBinary()!
 
         init(
             backlightGpio: IDF.GPIO.Pin,
@@ -229,11 +230,20 @@ class M5StackTab5 {
                 }
             }
             self.size = Size(width: Int(width), height: Int(height))
+
+            var callbacks = esp_lcd_dpi_panel_event_callbacks_t()
+            callbacks.on_refresh_done = { (panel, edata, user_ctx) in
+                let display = Unmanaged<Display>.fromOpaque(user_ctx!).takeUnretainedValue()
+                display.semaphore.giveFromISR()
+                return false
+            }
+            esp_lcd_dpi_panel_register_event_callbacks(panel, &callbacks, Unmanaged.passUnretained(self).toOpaque())
+            semaphore.give()
         }
 
-        var brightness: Float = 0 {
+        var brightness: Int = 0 {
             didSet {
-                backlight.setDutyFloat(brightness)
+                backlight.setDutyFloat(Float(brightness) / 100.0)
             }
         }
 
@@ -247,7 +257,14 @@ class M5StackTab5 {
         }
 
         func drawBitmap(rect: Rect, data: UnsafeRawPointer) {
-            esp_lcd_panel_draw_bitmap(panel, Int32(rect.minX), Int32(rect.minY), Int32(rect.maxX), Int32(rect.maxY), data)
+            semaphore.take(timeout: 100)
+            for _ in 0..<5 {
+                let result = esp_lcd_panel_draw_bitmap(panel, Int32(rect.minX), Int32(rect.minY), Int32(rect.maxX), Int32(rect.maxY), data)
+                if result == ESP_OK {
+                    break
+                }
+                Task.delay(10)
+            }
         }
     }
 

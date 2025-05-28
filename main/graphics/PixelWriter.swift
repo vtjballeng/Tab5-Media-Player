@@ -91,4 +91,19 @@ struct PixelWriter {
             }
         }
     }
+
+    func drawBitmap(_ data: (size: Size, bitmap: [UInt32]), at point: Point, color: Color) {
+        let rowCount = (data.size.width + 31) / 32
+        var row = 0
+        for y in 0..<data.size.height {
+            for x in 0..<data.size.width {
+                let pixelIndex = row + x / 32
+                let bitIndex = x % 32
+                if (data.bitmap[pixelIndex] & (1 << (31 - bitIndex))) != 0 {
+                    buffer[Int((point.y + y) * screenSize.width) + Int(point.x + x)] = color.rgb565
+                }
+            }
+            row += rowCount
+        }
+    }
 }
