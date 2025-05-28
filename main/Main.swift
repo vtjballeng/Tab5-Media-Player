@@ -27,10 +27,29 @@ func main() throws(IDF.Error) {
     try usbHost.install()
     try mscDriver.install(taskStackSize: 4096, taskPriority: 5, xCoreID: 0, createBackgroundTask: true)
     Task.delay(1000)
-    try mscDriver.mount(path: "/usb", maxFiles: 25)
+    var mountPoint = ""
+    while true {
+        do throws(IDF.Error) {
+            try mscDriver.mount(path: "/usb", maxFiles: 25)
+            mountPoint = "usb"
+            break
+        } catch {
+            Log.error("Failed to mount USB storage: \(error)")
+        }
+        do throws(IDF.Error) {
+            try tab5.sdcard.mount(path: "/sdcard", maxFiles: 25)
+            mountPoint = "sdcard"
+            break
+        } catch {
+            Log.error("Failed to mount SD card: \(error)")
+        }
+
+        Task.delay(1000)
+        Log.info("Retry mounting storage...")
+    }
 
     let fileManagerView = FileManagerView(size: tab5.display.size)
-    fileManagerView.push(path: "", name: "usb")
+    fileManagerView.push(path: "", name: mountPoint)
 
     let aviPlayer = try AVIPlayer()
     let aviPlayerSemaphore = Semaphore.createBinary()!
