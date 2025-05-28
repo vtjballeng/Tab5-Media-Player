@@ -9,7 +9,10 @@ class AVIPlayer {
     private var videoDataCallback: ((UnsafeMutableBufferPointer<UInt16>, Size) -> Void)? = nil
     private var audioDataCallback: ((UnsafeMutableRawBufferPointer) -> Void)? = nil
     private var audioSetClockCallback: ((_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void)? = nil
+    private var aviPlayEndCallback: (() -> Void)? = nil
     var pcmBuffer: UnsafeMutableRawBufferPointer
+
+    private(set) var isPlaying = false
 
     init() throws(IDF.Error) {
         self.videoDecoder = try IDF.JPEG.createDecoderRgb565(rgbElementOrder: .bgr, rgbConversion: .bt709)
@@ -38,6 +41,11 @@ class AVIPlayer {
         }
         config.audio_set_clock_cb = { (rate, bits, ch, arg) in
             Unmanaged<AVIPlayer>.fromOpaque(arg!).takeUnretainedValue().audioSetClockCallback?(rate, UInt8(bits), UInt8(ch))
+        }
+        config.avi_play_end_cb = { arg in
+            let player = Unmanaged<AVIPlayer>.fromOpaque(arg!).takeUnretainedValue()
+            player.isPlaying = false
+            player.aviPlayEndCallback?()
         }
         config.user_data = Unmanaged.passRetained(self).toOpaque()
         config.priority = 15
@@ -108,11 +116,15 @@ class AVIPlayer {
     func onAudioSetClock(_ callback: @escaping (_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void) {
         self.audioSetClockCallback = callback
     }
+    func onPlayEnd(_ callback: @escaping () -> Void) {
+        self.aviPlayEndCallback = callback
+    }
 
     func play(file: String) throws(IDF.Error) {
         let err = file.utf8CString.withUnsafeBufferPointer {
             avi_player_play_from_file($0.baseAddress!)
         }
         try IDF.Error.check(err)
+        isPlaying = true
     }
 }

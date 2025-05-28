@@ -18,6 +18,14 @@ class FileManager {
         }
         return entries
     }
+
+    func isDirectory(atPath path: String) -> Bool {
+        var statbuf = stat()
+        guard path.utf8CString.withUnsafeBufferPointer({ stat($0.baseAddress, &statbuf) }) == 0 else {
+            return false
+        }
+        return (statbuf.st_mode & UInt32(S_IFMT)) == S_IFDIR
+    }
 }
 
 fileprivate extension dirent {

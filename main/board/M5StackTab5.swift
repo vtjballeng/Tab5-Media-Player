@@ -132,8 +132,7 @@ class M5StackTab5 {
         private let mipiDsiBus: esp_lcd_dsi_bus_handle_t
         private let io: esp_lcd_panel_io_handle_t
         let panel: esp_lcd_panel_handle_t
-        let width: Int
-        let height: Int
+        let size: Size
 
         init(
             backlightGpio: IDF.GPIO.Pin,
@@ -229,8 +228,7 @@ class M5StackTab5 {
                     return dispPanel!
                 }
             }
-            self.width = Int(width)
-            self.height = Int(height)
+            self.size = Size(width: Int(width), height: Int(height))
         }
 
         var brightness: Float = 0 {
@@ -243,13 +241,13 @@ class M5StackTab5 {
             get {
                 var fb: UnsafeMutableRawPointer?
                 esp_lcd_dpi_panel_get_first_frame_buffer(panel, &fb)
-                let typedPointer = fb!.bindMemory(to: UInt16.self, capacity: width * height)
-                return UnsafeMutableBufferPointer<UInt16>(start: typedPointer, count: width * height)
+                let typedPointer = fb!.bindMemory(to: UInt16.self, capacity: size.width * size.height)
+                return UnsafeMutableBufferPointer<UInt16>(start: typedPointer, count: size.width * size.height)
             }
         }
 
-        func drawBitmap(start: (Int32, Int32), end: (Int32, Int32), data: UnsafeRawPointer) {
-            esp_lcd_panel_draw_bitmap(panel, start.0, start.1, end.0, end.1, data)
+        func drawBitmap(rect: Rect, data: UnsafeRawPointer) {
+            esp_lcd_panel_draw_bitmap(panel, Int32(rect.minX), Int32(rect.minY), Int32(rect.maxX), Int32(rect.maxY), data)
         }
     }
 
