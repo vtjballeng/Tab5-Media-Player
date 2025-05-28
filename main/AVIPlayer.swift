@@ -2,18 +2,19 @@ fileprivate let Log = Logger(tag: "AVIPlayer")
 
 class AVIPlayer {
 
-    let videoDecoder: IDF.JPEG.Decoder<UInt16>
-    let videoBuffer: UnsafeMutableBufferPointer<UInt16>
+    let videoDecoder: IDF.JPEG.Decoder
+    let videoBuffer: Memory.UniqueBuffer<UInt16>
     let audioDecoder: esp_audio_dec_handle_t
+    let audioBuffer: Memory.UniqueBuffer<UInt8>
 
-    private var videoDataCallback: ((UnsafeMutableBufferPointer<UInt16>, Size) -> Void)? = nil
-    private var audioDataCallback: ((UnsafeMutableRawBufferPointer) -> Void)? = nil
+    private var videoDataCallback: ((Memory.UnsafeMutableBuffer<UInt16>, Size) -> Void)? = nil
+    private var audioDataCallback: ((Memory.UnsafeMutableBuffer<UInt8>) -> Void)? = nil
     private var audioSetClockCallback: ((_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void)? = nil
-    var pcmBuffer: UnsafeMutableRawBufferPointer
+    private var aviPlayEndCallback: (() -> Void)? = nil
 
     init() throws(IDF.Error) {
         self.videoDecoder = try IDF.JPEG.createDecoderRgb565(rgbElementOrder: .bgr, rgbConversion: .bt709)
-        guard let videoBuffer = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: 1280 * 720) else {
+        guard let videoBuffer = IDF.JPEG.Decoder.allocateOutputBuffer(type: UInt16.self, count: 1280 * 720) else {
             throw IDF.Error(ESP_ERR_NO_MEM)
         }
         self.videoBuffer = videoBuffer
@@ -26,7 +27,10 @@ class AVIPlayer {
             throw IDF.Error(ESP_FAIL)
         }
         self.audioDecoder = audioDecoder!
-        pcmBuffer = Memory.allocateRaw(size: 32 * 1024, capability: .spiram)!
+        guard let audioBuffer = Memory.allocate(type: UInt8.self, capacity: 32 * 1024, capability: .spiram) else {
+            throw IDF.Error(ESP_ERR_NO_MEM)
+        }
+        self.audioBuffer = audioBuffer
 
         var config = avi_player_config_t()
         config.buffer_size = 4192 * 1024
@@ -38,6 +42,9 @@ class AVIPlayer {
         }
         config.audio_set_clock_cb = { (rate, bits, ch, arg) in
             Unmanaged<AVIPlayer>.fromOpaque(arg!).takeUnretainedValue().audioSetClockCallback?(rate, UInt8(bits), UInt8(ch))
+        }
+        config.avi_play_end_cb = { arg in
+            Unmanaged<AVIPlayer>.fromOpaque(arg!).takeUnretainedValue().aviPlayEndCallback?()
         }
         config.user_data = Unmanaged.passRetained(self).toOpaque()
         config.priority = 15
@@ -59,7 +66,7 @@ class AVIPlayer {
 
         do throws(IDF.Error) {
             let _ = try videoDecoder.decode(inputBuffer: inputBuffer, outputBuffer: videoBuffer)
-            callback(videoBuffer, Size(width: Int(data.pointee.video_info.width), height: Int(data.pointee.video_info.height)))
+            callback(videoBuffer.unsafe(), Size(width: Int(data.pointee.video_info.width), height: Int(data.pointee.video_info.height)))
         } catch {
             Log.error("Failed to decode JPEG: \(error)")
         }
@@ -75,38 +82,32 @@ class AVIPlayer {
             input.len = UInt32(data.pointee.data_bytes)
             input.frame_recover = ESP_AUDIO_DEC_RECOVERY_PLC
             var output = esp_audio_dec_out_frame_t()
-            output.buffer = pcmBuffer.assumingMemoryBound(to: UInt8.self).baseAddress!
-            output.len = UInt32(pcmBuffer.count)
+            output.buffer = audioBuffer.mutablePointer
+            output.len = UInt32(audioBuffer.size)
 
             let err = esp_audio_dec_process(audioDecoder, &input, &output)
             if err != ESP_AUDIO_ERR_OK {
                 Log.error("Audio decode error: \(err)")
                 return
             }
-
-            let audioBuffer = UnsafeMutableRawBufferPointer(
-                start: pcmBuffer.baseAddress!,
-                count: Int(output.decoded_size)
-            )
-            callback(audioBuffer)
+            callback(audioBuffer.slice(size: Int(output.decoded_size)))
             return
         } else {
-            let audioBuffer = UnsafeMutableRawBufferPointer(
-                start: data.pointee.data,
-                count: data.pointee.data_bytes
-            )
-            callback(audioBuffer)
+            callback(Memory.UnsafeMutableBuffer(data.pointee.data, size: Int(data.pointee.data_bytes)))
         }
     }
 
-    func onVideoData(_ callback: @escaping (UnsafeMutableBufferPointer<UInt16>, Size) -> Void) {
+    func onVideoData(_ callback: @escaping (Memory.UnsafeMutableBuffer<UInt16>, Size) -> Void) {
         self.videoDataCallback = callback
     }
-    func onAudioData(_ callback: @escaping (UnsafeMutableRawBufferPointer) -> Void) {
+    func onAudioData(_ callback: @escaping (Memory.UnsafeMutableBuffer<UInt8>) -> Void) {
         self.audioDataCallback = callback
     }
     func onAudioSetClock(_ callback: @escaping (_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void) {
         self.audioSetClockCallback = callback
+    }
+    func onPlayEnd(_ callback: @escaping () -> Void) {
+        self.aviPlayEndCallback = callback
     }
 
     func play(file: String) throws(IDF.Error) {

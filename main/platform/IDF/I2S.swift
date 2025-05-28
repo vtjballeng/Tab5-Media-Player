@@ -44,7 +44,7 @@ extension IDF {
 
         init(
             num: UInt32? = nil, role: Role = .master,
-            dmaDescNum: UInt32 = 6, dmaFrameNum: UInt32 = 240,
+            dmaDescNum: UInt32 = 6, dmaFrameNum: UInt32 = 256,
             autoClear: (beforeCb: Bool, afterCb: Bool) = (false, false),
             allowPd: Bool = false, intrPriority: Int32 = 0,
             format: (tx: Format, rx: Format),

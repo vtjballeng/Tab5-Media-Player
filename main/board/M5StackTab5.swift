@@ -134,6 +134,7 @@ class M5StackTab5 {
         let panel: esp_lcd_panel_handle_t
         let width: Int
         let height: Int
+        let semaphore = Semaphore.createBinary()!
 
         init(
             backlightGpio: IDF.GPIO.Pin,
@@ -231,6 +232,14 @@ class M5StackTab5 {
             }
             self.width = Int(width)
             self.height = Int(height)
+
+            var callbacks = esp_lcd_dpi_panel_event_callbacks_t()
+            callbacks.on_refresh_done = { (panel, edata, user_ctx) in
+                let display = Unmanaged<Display>.fromOpaque(user_ctx!).takeUnretainedValue()
+                display.semaphore.giveFromISR()
+                return false
+            }
+            esp_lcd_dpi_panel_register_event_callbacks(panel, &callbacks, Unmanaged.passUnretained(self).toOpaque())
         }
 
         var brightness: Float = 0 {
@@ -239,17 +248,17 @@ class M5StackTab5 {
             }
         }
 
-        var frameBuffer: UnsafeMutableBufferPointer<UInt16> {
+        var frameBuffer: Memory.UnsafeMutableBuffer<UInt16> {
             get {
                 var fb: UnsafeMutableRawPointer?
                 esp_lcd_dpi_panel_get_first_frame_buffer(panel, &fb)
-                let typedPointer = fb!.bindMemory(to: UInt16.self, capacity: width * height)
-                return UnsafeMutableBufferPointer<UInt16>(start: typedPointer, count: width * height)
+                return .init(fb!, to: UInt16.self, count: width * height)
             }
         }
 
-        func drawBitmap(start: (Int32, Int32), end: (Int32, Int32), data: UnsafeRawPointer) {
-            esp_lcd_panel_draw_bitmap(panel, start.0, start.1, end.0, end.1, data)
+        func drawBitmap<D: ~Copyable & Memory.IntoRawPointer>(start: (Int32, Int32), end: (Int32, Int32), data: borrowing D) {
+            esp_lcd_panel_draw_bitmap(panel, start.0, start.1, end.0, end.1, data.rawPointer)
+            semaphore.take()
         }
     }
 
@@ -447,8 +456,8 @@ class M5StackTab5 {
             try IDF.Error.check(esp_codec_dev_close(outputDevice))
             try IDF.Error.check(esp_codec_dev_open(outputDevice, &fs))
         }
-        func write(_ data: UnsafeMutableRawBufferPointer) throws(IDF.Error) {
-            try IDF.Error.check(esp_codec_dev_write(outputDevice, data.baseAddress!, Int32(data.count)))
+        func write<D: ~Copyable & Memory.IntoMutableRawBuffer>(_ data: borrowing D) throws(IDF.Error) {
+            try IDF.Error.check(esp_codec_dev_write(outputDevice, data.mutableRawPointer, Int32(data.size)))
         }
 
         var volume: Int = -1 {

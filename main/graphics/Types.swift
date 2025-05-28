@@ -2,6 +2,8 @@ struct Point: Equatable, CustomStringConvertible {
     var x: Int
     var y: Int
 
+    static let zero = Point(x: 0, y: 0)
+
     static func == (lhs: Self, rhs: Self) -> Bool {
         return lhs.x == rhs.x && lhs.y == rhs.y
     }
@@ -20,6 +22,8 @@ struct Point: Equatable, CustomStringConvertible {
 struct Size: Equatable, CustomStringConvertible {
     var width: Int
     var height: Int
+
+    var pixels: Int { width * height }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         return lhs.width == rhs.width && lhs.height == rhs.height

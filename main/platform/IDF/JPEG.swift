@@ -62,16 +62,16 @@ extension IDF {
             rgbConversion: DecoderRGBConversion = .bt601,
             intrPriority: Int32 = 0,
             timeout: Int32 = 100,
-        ) throws(IDF.Error) -> Decoder<UInt16> {
+        ) throws(IDF.Error) -> Decoder {
             let decodeConfig = jpeg_decode_cfg_t(
                 output_format: DecoderOutFormat.rgb565.value,
                 rgb_order: rgbElementOrder.value,
                 conv_std: rgbConversion.value
             )
-            return try Decoder<UInt16>(intrPriority: intrPriority, timeout: timeout, decodeConfig: decodeConfig)
+            return try Decoder(intrPriority: intrPriority, timeout: timeout, decodeConfig: decodeConfig)
         }
 
-        class Decoder<E> {
+        class Decoder {
             private let engine: jpeg_decoder_handle_t
             private var decodeConfig: jpeg_decode_cfg_t
 
@@ -90,27 +90,26 @@ extension IDF {
                 jpeg_del_decoder_engine(engine)
             }
 
-            static func allocateOutputBuffer(capacity: Int) -> UnsafeMutableBufferPointer<E>? {
-                let size = MemoryLayout<E>.size * capacity
+            static func allocateOutputBuffer<T>(type: T.Type, count: Int) -> Memory.UniqueBuffer<T>? {
+                let size = MemoryLayout<T>.size * count
                 var allocatedSize = 0
                 var allocConfig = jpeg_decode_memory_alloc_cfg_t(buffer_direction: JPEG_DEC_ALLOC_OUTPUT_BUFFER)
-                let pointer = jpeg_alloc_decoder_mem(size, &allocConfig, &allocatedSize)
-                if pointer == nil {
+                guard let pointer = jpeg_alloc_decoder_mem(size, &allocConfig, &allocatedSize) else {
                     return nil
                 }
-                return UnsafeMutableBufferPointer<E>(
-                    start: pointer?.bindMemory(to: E.self, capacity: allocatedSize / MemoryLayout<E>.size),
-                    count: allocatedSize / MemoryLayout<E>.size
-                )
+                return Memory.UniqueBuffer(pointer, to: T.self, count: count, dealloc: heap_caps_free)
             }
 
-            func decode(inputBuffer: UnsafeRawBufferPointer, outputBuffer: UnsafeMutableBufferPointer<E>) throws(IDF.Error) -> UInt32 {
+            func decode<
+                I: ~Copyable & Memory.IntoRawBuffer,
+                O: ~Copyable & Memory.IntoMutableRawBuffer
+            >(inputBuffer: borrowing I, outputBuffer: borrowing O) throws(IDF.Error) -> UInt32 {
                 var decodeSize: UInt32 = 0
                 try IDF.Error.check(
                     jpeg_decoder_process(
                         engine, &decodeConfig,
-                        inputBuffer.baseAddress, UInt32(inputBuffer.count),
-                        outputBuffer.baseAddress, UInt32(MemoryLayout<E>.size * outputBuffer.count),
+                        inputBuffer.rawPointer, UInt32(inputBuffer.size),
+                        outputBuffer.mutableRawPointer, UInt32(outputBuffer.size),
                         &decodeSize
                     )
                 )

@@ -116,7 +116,7 @@ class Font {
         }
     }
 
-    func drawBitmap(_ string: String, drawPixel: (Point, UInt8) -> Void) {
+    func drawBitmap(_ string: String, maxWidth: Int? = nil, drawPixel: (Point, UInt8) -> Void) {
         var offsetX: Int = 0
         for char in string.unicodeScalars {
             var bitmapWidth: Int32 = 0, bitmapHeight: Int32 = 0
@@ -125,6 +125,9 @@ class Font {
                 &fontInfo, 0, sizeInfo.scale, Int32(char.value),
                 &bitmapWidth, &bitmapHeight, &xoff, &yoff
             ) {
+                if let maxWidth = maxWidth, offsetX + Int(bitmapWidth) > maxWidth {
+                    break
+                }
                 for y in 0..<bitmapHeight {
                     for x in 0..<bitmapWidth {
                         let point = Point(x: Int(x + xoff) + offsetX, y: sizeInfo.baseline + Int(yoff + y))
