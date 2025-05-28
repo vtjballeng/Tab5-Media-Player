@@ -35,14 +35,13 @@ func main() throws(IDF.Error) {
     let aviPlayer = try AVIPlayer()
     let aviPlayerSemaphore = Semaphore.createBinary()!
     var pause = false, showControls = false
-    aviPlayer.onVideoData { buffer, size in
-        let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
-        tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: buffer.baseAddress!)
+    let videoBufferTx = Queue<(UnsafeMutableBufferPointer<UInt8>, Int, Size)>(capacity: 4)!
+    aviPlayer.onVideoData { buffer, bufferSize, frameSize in
+        videoBufferTx.send((buffer, bufferSize, frameSize))
         while pause {
             Task.delay(100)
-            let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
-            tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: buffer.baseAddress!)
         }
+        return false
     }
     aviPlayer.onAudioData { buffer in
         try! tab5.audio.write(buffer)
@@ -54,6 +53,29 @@ func main() throws(IDF.Error) {
     }
     aviPlayer.onPlayEnd {
         aviPlayerSemaphore.give()
+    }
+    Task(name: "MJpegDecoder", priority: 15, xCoreID: 1) { _ in
+        let videoDecoder = try! IDF.JPEG.createDecoderRgb565(rgbElementOrder: .bgr, rgbConversion: .bt709)
+        let videoBuffer = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
+        for (buffer, bufferSize, _) in videoBufferTx {
+            let inputBuffer = UnsafeRawBufferPointer(
+                start: buffer.baseAddress!,
+                count: bufferSize
+            )
+            do throws(IDF.Error) {
+                let _ = try videoDecoder.decode(inputBuffer: inputBuffer, outputBuffer: videoBuffer)
+                let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
+                tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!)
+                while pause {
+                    Task.delay(100)
+                    let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
+                    tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!)
+                }
+            } catch {
+                Log.error("Failed to decode video frame: \(error)")
+            }
+            aviPlayer.returnVideoBuffer(buffer)
+        }
     }
 
     let rect = Rect(x: 0, y: 1280 - 300, width: 720, height: 300)

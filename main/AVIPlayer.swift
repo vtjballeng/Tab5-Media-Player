@@ -2,11 +2,10 @@ fileprivate let Log = Logger(tag: "AVIPlayer")
 
 class AVIPlayer {
 
-    let videoDecoder: IDF.JPEG.Decoder<UInt16>
-    let videoBuffer: UnsafeMutableBufferPointer<UInt16>
+    let videoBufferPool = Queue<UnsafeMutableBufferPointer<UInt8>>(capacity: 4)!
     let audioDecoder: esp_audio_dec_handle_t
 
-    private var videoDataCallback: ((UnsafeMutableBufferPointer<UInt16>, Size) -> Void)? = nil
+    private var videoDataCallback: ((UnsafeMutableBufferPointer<UInt8>, Int, Size) -> Bool)? = nil
     private var audioDataCallback: ((UnsafeMutableRawBufferPointer) -> Void)? = nil
     private var audioSetClockCallback: ((_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void)? = nil
     private var aviPlayEndCallback: (() -> Void)? = nil
@@ -15,11 +14,10 @@ class AVIPlayer {
     private(set) var isPlaying = false
 
     init() throws(IDF.Error) {
-        self.videoDecoder = try IDF.JPEG.createDecoderRgb565(rgbElementOrder: .bgr, rgbConversion: .bt709)
-        guard let videoBuffer = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: 1280 * 720) else {
-            throw IDF.Error(ESP_ERR_NO_MEM)
+        for _ in 0..<4 {
+            let buffer = IDF.JPEG.Decoder<UInt8>.allocateOutputBuffer(capacity: 1024 * 1024)!
+            videoBufferPool.send(buffer)
         }
-        self.videoBuffer = videoBuffer
 
         esp_mp3_dec_register()
         var decoderConfig = esp_audio_dec_cfg_t()
@@ -60,17 +58,24 @@ class AVIPlayer {
             Log.error("Unsupported video format")
             return
         }
-        let inputBuffer = UnsafeRawBufferPointer(
-            start: data.pointee.data,
-            count: Int(data.pointee.data_bytes)
-        )
 
-        do throws(IDF.Error) {
-            let _ = try videoDecoder.decode(inputBuffer: inputBuffer, outputBuffer: videoBuffer)
-            callback(videoBuffer, Size(width: Int(data.pointee.video_info.width), height: Int(data.pointee.video_info.height)))
-        } catch {
-            Log.error("Failed to decode JPEG: \(error)")
+        let videoBuffer = videoBufferPool.receive(timeout: 0)
+        if let videoBuffer = videoBuffer {
+            memcpy(videoBuffer.baseAddress, data.pointee.data, data.pointee.data_bytes)
+            if callback(
+                videoBuffer,
+                Int(data.pointee.data_bytes),
+                Size(width: Int(data.pointee.video_info.width), height: Int(data.pointee.video_info.height))
+            ) {
+                videoBufferPool.send(videoBuffer)
+            }
+        } else {
+            Log.error("Frame dropped.")
         }
+    }
+
+    func returnVideoBuffer(_ buffer: UnsafeMutableBufferPointer<UInt8>) {
+        videoBufferPool.send(buffer)
     }
 
     private func audioCallback(data: UnsafeMutablePointer<frame_data_t>) {
@@ -107,7 +112,7 @@ class AVIPlayer {
         }
     }
 
-    func onVideoData(_ callback: @escaping (UnsafeMutableBufferPointer<UInt16>, Size) -> Void) {
+    func onVideoData(_ callback: @escaping (UnsafeMutableBufferPointer<UInt8>, Int, Size) -> Bool) {
         self.videoDataCallback = callback
     }
     func onAudioData(_ callback: @escaping (UnsafeMutableRawBufferPointer) -> Void) {
