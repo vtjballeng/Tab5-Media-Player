@@ -80,8 +80,18 @@ func main() throws(IDF.Error) {
         var lastTick: UInt32? = nil
         var frameCount = 0
         let videoDecoder = try! IDF.JPEG.createDecoderRgb565(rgbElementOrder: .bgr, rgbConversion: .bt709)
-        let videoBuffer = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
-        for (buffer, bufferSize, _) in videoBufferTx {
+        let decodeBuffer1 = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
+        let decodeBuffer2 = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
+        let videoBuffer1 = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
+        let videoBuffer2 = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
+        let ppa = try! IDF.PPAClient(operType: .srm)
+        var bufferToggle = false
+        for (buffer, bufferSize, frameSize) in videoBufferTx {
+            if frameSize.width * frameSize.height > 720 * 1280 {
+                Log.error("Received video frame larger than 720x1280: \(frameSize.width)x\(frameSize.height)")
+                continue
+            }
+
             let inputBuffer = UnsafeRawBufferPointer(
                 start: buffer.baseAddress!,
                 count: bufferSize
@@ -102,14 +112,29 @@ func main() throws(IDF.Error) {
             }
 
             do throws(IDF.Error) {
-                let _ = try videoDecoder.decode(inputBuffer: inputBuffer, outputBuffer: videoBuffer)
-                let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
-                tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!, retry: false)
+                let decodeBuffer = bufferToggle ? decodeBuffer1 : decodeBuffer2
+                let videoBuffer = bufferToggle ? videoBuffer1 : videoBuffer2
+                let _ = try videoDecoder.decode(inputBuffer: inputBuffer, outputBuffer: decodeBuffer)
+                let draw = { () throws(IDF.Error) in
+                    let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
+                    if frameSize.width == 720 && frameSize.height == 1280 {
+                        tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: decodeBuffer.baseAddress!, retry: false)
+                    } else {
+                        try ppa.fitScreen(
+                            inputBuffer: decodeBuffer,
+                            inputSize: frameSize,
+                            outputBuffer: videoBuffer,
+                            outputSize: tab5.display.size
+                        )
+                        tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!)
+                    }
+                }
+                try draw()
                 while aviPlayer.isPaused {
                     Task.delay(100)
-                    let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
-                    tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!)
+                    try draw()
                 }
+                bufferToggle.toggle()
             } catch {
                 Log.error("Failed to decode video frame: \(error)")
             }
@@ -126,6 +151,7 @@ func main() throws(IDF.Error) {
         if aviPlayer.isPlaying {
             if !showControls || point.y < 1280 - 300 {
                 showControls.toggle()
+                Task.delay(30)
             } else {
                 let point = Point(x: point.x, y: point.y - (1280 - 300))
                 let controlEvent = playerControlView.onTap(point: point)
@@ -380,9 +406,9 @@ class PlayerControlView {
         case brightness(diff: Int)
     }
 
-    private let closeButton = Icon(center: Point(x: 100, y: 150), icon: Icons.close)
-    private let playButton = Icon(center: Point(x: 225, y: 150), icon: Icons.play)
-    private let pauseButton = Icon(center: Point(x: 221, y: 150), icon: Icons.pause)
+    private let closeButton = Icon(center: Point(x: 90, y: 150), icon: Icons.close)
+    private let playButton = Icon(center: Point(x: 215, y: 150), icon: Icons.play)
+    private let pauseButton = Icon(center: Point(x: 211, y: 150), icon: Icons.pause)
     private let volMinusButton = Icon(center: Point(x: 355, y: 85), icon: Icons.minus)
     private let volPlusButton = Icon(center: Point(x: 655, y: 85), icon: Icons.plus)
     private let volIcon = Icon(center: Point(x: 430, y: 85), icon: Icons.speaker)
@@ -428,7 +454,6 @@ class PlayerControlView {
             fontSize: fontSize,
             color: .white
         )
-
         return buffer
     }
 
