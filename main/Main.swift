@@ -241,7 +241,7 @@ class FileManagerView {
             self.path = path + "/" + name
             self.name = name
             let items = FileManager.default.contentsOfDirectory(atPath: self.path) ?? []
-            self.items = items.sorted().map {
+            self.items = items.sorted(by: naturalSort).map {
                 (name: $0, isDirectory: FileManager.default.isDirectory(atPath: path + "/" + name + "/" + $0))
             }
         }
