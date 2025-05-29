@@ -44,6 +44,12 @@ func main() throws(IDF.Error) {
             Log.error("Failed to mount SD card: \(error)")
         }
 
+        let writer = PixelWriter(buffer: frameBuffer, screenSize: tab5.display.size)
+        writer.drawText("Storage not found.", at: Point(x: 40, y: 40), fontSize: 54, color: .white)
+        writer.drawText("Please insert USB or", at: Point(x: 40, y: 114), fontSize: 54, color: .white)
+        writer.drawText("SD card.", at: Point(x: 40, y: 188), fontSize: 54, color: .white)
+        tab5.display.drawBitmap(rect: Rect(origin: .zero, size: tab5.display.size), data: frameBuffer.baseAddress!)
+
         Task.delay(1000)
         Log.info("Retry mounting storage...")
     }
@@ -53,13 +59,10 @@ func main() throws(IDF.Error) {
 
     let aviPlayer = try AVIPlayer()
     let aviPlayerSemaphore = Semaphore.createBinary()!
-    var pause = false, showControls = false
+    var showControls = false
     let videoBufferTx = Queue<(UnsafeMutableBufferPointer<UInt8>, Int, Size)>(capacity: 4)!
     aviPlayer.onVideoData { buffer, bufferSize, frameSize in
         videoBufferTx.send((buffer, bufferSize, frameSize))
-        while pause {
-            Task.delay(100)
-        }
         return false
     }
     aviPlayer.onAudioData { buffer in
@@ -74,6 +77,8 @@ func main() throws(IDF.Error) {
         aviPlayerSemaphore.give()
     }
     Task(name: "MJpegDecoder", priority: 15, xCoreID: 1) { _ in
+        var lastTick: UInt32? = nil
+        var frameCount = 0
         let videoDecoder = try! IDF.JPEG.createDecoderRgb565(rgbElementOrder: .bgr, rgbConversion: .bt709)
         let videoBuffer = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
         for (buffer, bufferSize, _) in videoBufferTx {
@@ -81,11 +86,26 @@ func main() throws(IDF.Error) {
                 start: buffer.baseAddress!,
                 count: bufferSize
             )
+
+            frameCount += 1
+            if let _lastTick = lastTick {
+                let currentTick = Task.tickCount
+                let elapsed = currentTick - _lastTick
+                if elapsed >= Task.ticks(1000) {
+                    Log.info("FPS: \(frameCount)")
+                    frameCount = 0
+                    lastTick = currentTick
+                }
+            } else {
+                frameCount = 0
+                lastTick = Task.tickCount
+            }
+
             do throws(IDF.Error) {
                 let _ = try videoDecoder.decode(inputBuffer: inputBuffer, outputBuffer: videoBuffer)
                 let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
-                tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!)
-                while pause {
+                tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!, retry: false)
+                while aviPlayer.isPaused {
                     Task.delay(100)
                     let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
                     tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!)
@@ -114,7 +134,11 @@ func main() throws(IDF.Error) {
                     try? aviPlayer.stop()
                     // aviPlayerSemaphore.give()
                 case .playPause:
-                    pause.toggle()
+                    if aviPlayer.isPaused {
+                        aviPlayer.resume()
+                    } else {
+                        aviPlayer.pause()
+                    }
                 case .volume(let diff):
                     tab5.audio.volume = max(0, min(100, tab5.audio.volume + diff))
                 case .brightness(let diff):
@@ -125,7 +149,7 @@ func main() throws(IDF.Error) {
             }
             if showControls {
                 let buffer = playerControlView.draw(
-                    pause: !pause, volume: tab5.audio.volume, brightness: tab5.display.brightness
+                    pause: !aviPlayer.isPaused, volume: tab5.audio.volume, brightness: tab5.display.brightness
                 )
                 tab5.display.drawBitmap(rect: rect, data: buffer.baseAddress!)
             }

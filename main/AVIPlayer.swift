@@ -12,6 +12,7 @@ class AVIPlayer {
     var pcmBuffer: UnsafeMutableRawBufferPointer
 
     private(set) var isPlaying = false
+    private(set) var isPaused = false
 
     init() throws(IDF.Error) {
         for _ in 0..<4 {
@@ -51,6 +52,9 @@ class AVIPlayer {
     }
 
     private func videoCallback(data: UnsafeMutablePointer<frame_data_t>) {
+        while isPaused {
+            Task.delay(100)
+        }
         guard let callback = videoDataCallback else {
             return
         }
@@ -130,12 +134,22 @@ class AVIPlayer {
             avi_player_play_from_file($0.baseAddress!)
         }
         try IDF.Error.check(err)
+        isPaused = false
         isPlaying = true
     }
 
     func stop() throws(IDF.Error) {
         guard isPlaying else { return }
         isPlaying = false
+        isPaused = false
         try IDF.Error.check(avi_player_play_stop())
+    }
+
+    func pause() {
+        isPaused = true
+    }
+
+    func resume() {
+        isPaused = false
     }
 }

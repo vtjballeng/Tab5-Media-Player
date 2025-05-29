@@ -256,11 +256,11 @@ class M5StackTab5 {
             }
         }
 
-        func drawBitmap(rect: Rect, data: UnsafeRawPointer) {
+        func drawBitmap(rect: Rect, data: UnsafeRawPointer, retry: Bool = true) {
             semaphore.take(timeout: 100)
             for _ in 0..<5 {
                 let result = esp_lcd_panel_draw_bitmap(panel, Int32(rect.minX), Int32(rect.minY), Int32(rect.maxX), Int32(rect.maxY), data)
-                if result == ESP_OK {
+                if result == ESP_OK || !retry {
                     break
                 }
                 Task.delay(10)
