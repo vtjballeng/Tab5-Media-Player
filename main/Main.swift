@@ -71,7 +71,6 @@ func main() throws(IDF.Error) {
     aviPlayer.onAudioSetClock { sampleRate, bitsPerSample, channels in
         Log.info("Audio Clock: \(sampleRate)Hz, \(bitsPerSample)-bit, \(channels) channels")
         try! tab5.audio.reconfigOutput(rate: sampleRate, bps: bitsPerSample, ch: channels)
-        tab5.audio.volume = 40
     }
     aviPlayer.onPlayEnd {
         aviPlayerSemaphore.give()
@@ -191,6 +190,7 @@ func main() throws(IDF.Error) {
         }
     }
 
+    tab5.audio.volume = 40
     while true {
         let buffer = fileManagerView.draw()
         tab5.display.drawBitmap(rect: Rect(origin: .zero, size: fileManagerView.size), data: buffer.baseAddress!)
