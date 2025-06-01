@@ -2,10 +2,10 @@ fileprivate let Log = Logger(tag: "AVIPlayer")
 
 class AVIPlayer {
 
-    let videoBufferPool = Queue<UnsafeMutableBufferPointer<UInt8>>(capacity: 4)!
+    let videoBufferPool = Queue<UnsafeMutableRawBufferPointer>(capacity: 4)!
     let audioDecoder: esp_audio_dec_handle_t
 
-    private var videoDataCallback: ((UnsafeMutableBufferPointer<UInt8>, Int, Size) -> Bool)? = nil
+    private var videoDataCallback: ((UnsafeMutableRawBufferPointer, Int, Size) -> Bool)? = nil
     private var audioDataCallback: ((UnsafeMutableRawBufferPointer) -> Void)? = nil
     private var audioSetClockCallback: ((_ sampleRate: UInt32, _ bitsPerSample: UInt8, _ channels: UInt8) -> Void)? = nil
     private var aviPlayEndCallback: (() -> Void)? = nil
@@ -16,7 +16,7 @@ class AVIPlayer {
 
     init() throws(IDF.Error) {
         for _ in 0..<4 {
-            let buffer = IDF.JPEG.Decoder<UInt8>.allocateOutputBuffer(capacity: 1024 * 1024)!
+            let buffer = IDF.JPEG.Decoder.allocateOutputBuffer(size: 1024 * 1024)!
             videoBufferPool.send(buffer)
         }
 
@@ -78,7 +78,7 @@ class AVIPlayer {
         }
     }
 
-    func returnVideoBuffer(_ buffer: UnsafeMutableBufferPointer<UInt8>) {
+    func returnVideoBuffer(_ buffer: UnsafeMutableRawBufferPointer) {
         videoBufferPool.send(buffer)
     }
 
@@ -116,7 +116,7 @@ class AVIPlayer {
         }
     }
 
-    func onVideoData(_ callback: @escaping (UnsafeMutableBufferPointer<UInt8>, Int, Size) -> Bool) {
+    func onVideoData(_ callback: @escaping (UnsafeMutableRawBufferPointer, Int, Size) -> Bool) {
         self.videoDataCallback = callback
     }
     func onAudioData(_ callback: @escaping (UnsafeMutableRawBufferPointer) -> Void) {

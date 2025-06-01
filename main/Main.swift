@@ -20,7 +20,8 @@ func main() throws(IDF.Error) {
     }
 
     let fontPartition = IDF.Partition(type: 0x40, subtype: 0)!
-    PixelWriter.defaultFont = Font(from: fontPartition)!
+    FontFamily.default = FontFamily(from: fontPartition)
+    let drawable = tab5.display.drawable
 
     let usbHost = USBHost()
     let mscDriver = USBHost.MSC()
@@ -44,23 +45,23 @@ func main() throws(IDF.Error) {
             Log.error("Failed to mount SD card: \(error)")
         }
 
-        let writer = PixelWriter(buffer: frameBuffer, screenSize: tab5.display.size)
-        writer.drawText("Storage not found.", at: Point(x: 40, y: 40), fontSize: 54, color: .white)
-        writer.drawText("Please insert USB or", at: Point(x: 40, y: 114), fontSize: 54, color: .white)
-        writer.drawText("SD card.", at: Point(x: 40, y: 188), fontSize: 54, color: .white)
-        tab5.display.drawBitmap(rect: Rect(origin: .zero, size: tab5.display.size), data: frameBuffer.baseAddress!)
+        let font = FontFamily.default.font(size: 54)
+        drawable.drawText("Storage not found.", at: Point(x: 40, y: 40), font: font, color: .white)
+        drawable.drawText("Please insert USB or", at: Point(x: 40, y: 114), font: font, color: .white)
+        drawable.drawText("SD card.", at: Point(x: 40, y: 188), font: font, color: .white)
+        drawable.flush()
 
         Task.delay(1000)
         Log.info("Retry mounting storage...")
     }
 
-    let fileManagerView = FileManagerView(size: tab5.display.size)
+    let fileManagerView = FileManagerView<RGB888>(size: tab5.display.size)
     fileManagerView.push(path: "", name: mountPoint)
 
     let aviPlayer = try AVIPlayer()
     let aviPlayerSemaphore = Semaphore.createBinary()!
     var showControls = false
-    let videoBufferTx = Queue<(UnsafeMutableBufferPointer<UInt8>, Int, Size)>(capacity: 4)!
+    let videoBufferTx = Queue<(UnsafeMutableRawBufferPointer, Int, Size)>(capacity: 4)!
     aviPlayer.onVideoData { buffer, bufferSize, frameSize in
         videoBufferTx.send((buffer, bufferSize, frameSize))
         return false
@@ -78,11 +79,11 @@ func main() throws(IDF.Error) {
     Task(name: "MJpegDecoder", priority: 15, xCoreID: 1) { _ in
         var lastTick: UInt32? = nil
         var frameCount = 0
-        let videoDecoder = try! IDF.JPEG.createDecoderRgb565(rgbElementOrder: .bgr, rgbConversion: .bt709)
-        let decodeBuffer1 = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
-        let decodeBuffer2 = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
-        let videoBuffer1 = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
-        let videoBuffer2 = IDF.JPEG.Decoder<UInt16>.allocateOutputBuffer(capacity: tab5.display.size.width * tab5.display.size.height)!
+        let videoDecoder = try! IDF.JPEG.Decoder(outputFormat: .rgb888(elementOrder: .bgr, conversion: .bt709))
+        let decodeBuffer1 = IDF.JPEG.Decoder.allocateOutputBuffer(size: tab5.display.size.width * tab5.display.size.height * 3)!
+        let decodeBuffer2 = IDF.JPEG.Decoder.allocateOutputBuffer(size: tab5.display.size.width * tab5.display.size.height * 3)!
+        let videoBuffer1 = IDF.JPEG.Decoder.allocateOutputBuffer(size: tab5.display.size.width * tab5.display.size.height * 3)!
+        let videoBuffer2 = IDF.JPEG.Decoder.allocateOutputBuffer(size: tab5.display.size.width * tab5.display.size.height * 3)!
         let ppa = try! IDF.PPAClient(operType: .srm)
         var bufferToggle = false
         for (buffer, bufferSize, frameSize) in videoBufferTx {
@@ -113,27 +114,33 @@ func main() throws(IDF.Error) {
             do throws(IDF.Error) {
                 let decodeBuffer = bufferToggle ? decodeBuffer1 : decodeBuffer2
                 let videoBuffer = bufferToggle ? videoBuffer1 : videoBuffer2
-                let _ = try videoDecoder.decode(inputBuffer: inputBuffer, outputBuffer: decodeBuffer)
-                let draw = { () throws(IDF.Error) in
-                    let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
-                    if frameSize.width == 720 && frameSize.height == 1280 {
-                        tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: decodeBuffer.baseAddress!, retry: false)
-                    } else {
-                        try ppa.fitScreen(
-                            inputBuffer: decodeBuffer,
-                            inputSize: frameSize,
-                            outputBuffer: videoBuffer,
-                            outputSize: tab5.display.size
-                        )
-                        tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!)
-                    }
-                }
-                try draw()
-                while aviPlayer.isPaused {
-                    Task.delay(100)
-                    try draw()
-                }
-                bufferToggle.toggle()
+                let _ = try videoDecoder.decode(
+                    inputBuffer: inputBuffer,
+                    outputBuffer: UnsafeMutableRawBufferPointer(
+                        start: frameBuffer.baseAddress!,
+                        count: frameBuffer.count * 3
+                    )
+                )
+                drawable.flush()
+                // let _ = try videoDecoder.decode(inputBuffer: inputBuffer, outputBuffer: decodeBuffer)
+                // let draw = { () throws(IDF.Error) in
+                //     let size = showControls ? Size(width: 720, height: 1280 - 300) : tab5.display.size
+                //     if frameSize.width == 720 && frameSize.height == 1280 {
+                //         tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: decodeBuffer.baseAddress!, retry: false)
+                //     } else {
+                //         try ppa.fitScreen(
+                //             input: (buffer: UnsafeRawBufferPointer(decodeBuffer), size: frameSize, colorMode: PPA_SRM_COLOR_MODE_RGB565),
+                //             output: (buffer: videoBuffer, size: tab5.display.size, colorMode: PPA_SRM_COLOR_MODE_RGB565),
+                //         )
+                //         tab5.display.drawBitmap(rect: Rect(origin: .zero, size: size), data: videoBuffer.baseAddress!)
+                //     }
+                // }
+                // try draw()
+                // while aviPlayer.isPaused {
+                //     Task.delay(100)
+                //     try draw()
+                // }
+                // bufferToggle.toggle()
             } catch {
                 Log.error("Failed to decode video frame: \(error)")
             }
@@ -142,7 +149,7 @@ func main() throws(IDF.Error) {
     }
 
     let rect = Rect(x: 0, y: 1280 - 300, width: 720, height: 300)
-    let playerControlView = PlayerControlView(size: rect.size)
+    let playerControlView = PlayerControlView<RGB888>(size: rect.size)
 
     var selectedFile: String? = nil
     multiTouch.onEvent { event in
@@ -220,7 +227,7 @@ func main() throws(IDF.Error) {
     }
 }
 
-class FileManagerView {
+class FileManagerView<P: Pixel> {
 
     class Directory {
         let path: String
@@ -251,8 +258,8 @@ class FileManagerView {
     var currentDirectory: Directory? {
         return directories.last
     }
-    let writer: PixelWriter
-    var buffer: UnsafeMutableBufferPointer<UInt16> {
+    let writer: Drawable<P>
+    var buffer: UnsafeMutableBufferPointer<P> {
         return writer.buffer
     }
     var size: Size {
@@ -260,15 +267,15 @@ class FileManagerView {
     }
 
     init(size: Size) {
-        let buffer = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: size.width * size.height)
-        self.writer = PixelWriter(buffer: buffer, screenSize: size)
+        let buffer = UnsafeMutableBufferPointer<P>.allocate(capacity: size.width * size.height)
+        self.writer = Drawable(buffer: buffer.baseAddress!, screenSize: size)
     }
 
     private let headerHeight = 160
     private let cellHeight = 100
     private let footerHeight = 120
 
-    func draw() -> UnsafeMutableBufferPointer<UInt16> {
+    func draw() -> UnsafeMutableBufferPointer<P> {
         writer.clear(color: .white)
         drawHeader(rect: Rect(x: 0, y: 0, width: size.width, height: headerHeight))
         for i in 0..<10 {
@@ -285,7 +292,7 @@ class FileManagerView {
     private func drawHeader(rect: Rect) {
         writer.fillRect(rect: Rect(x: rect.minX, y: rect.maxY, width: rect.width, height: 2), color: .black)
 
-        let fontSize = 72
+        let font = FontFamily.default.font(size: 72)
         let leftOrigin = 40
         var title = currentDirectory?.name ?? ""
         if directories.count == 1 {
@@ -296,19 +303,19 @@ class FileManagerView {
             title = "< " + title
         }
         writer.drawText(title,
-            at: Point(x: rect.minX + leftOrigin, y: rect.minY + (rect.height - fontSize) / 2),
-            fontSize: fontSize,
+            at: Point(x: rect.minX + leftOrigin, y: rect.minY + (rect.height - font.size) / 2),
+            font: font,
             color: .black
         )
     }
 
     private func drawCell(rect: Rect, item: (name: String, isDirectory: Bool)) {
 
-        let fontSize = 48
+        let font = FontFamily.default.font(size: 48)
         let leftOrigin = 40
         writer.drawText(item.name,
-            at: Point(x: rect.minX + leftOrigin, y: rect.minY + (rect.height - fontSize) / 2),
-            fontSize: fontSize,
+            at: Point(x: rect.minX + leftOrigin, y: rect.minY + (rect.height - font.size) / 2),
+            font: font,
             color: item.isDirectory ? .blue : .black
         )
     }
@@ -316,17 +323,17 @@ class FileManagerView {
     private func drawFooter(rect: Rect) {
         writer.fillRect(rect: Rect(x: rect.minX, y: rect.minY, width: rect.width, height: 2), color: .black)
 
-        let fontSize = 48
-        writer.drawText("<<", at: Point(x: rect.minX + 40, y: rect.minY + (rect.height - fontSize) / 2), fontSize: fontSize, color: .black)
+        let font = FontFamily.default.font(size: 48)
+        writer.drawText("<<", at: Point(x: rect.minX + 40, y: rect.minY + (rect.height - font.size) / 2), font: font, color: .black)
 
-        let arrowWidth = PixelWriter.defaultFont!.width(of: ">>")
-        writer.drawText(">>", at: Point(x: rect.maxX - arrowWidth - 40, y: rect.minY + (rect.height - fontSize) / 2), fontSize: fontSize, color: .black)
+        let arrowWidth = font.width(of: ">>")
+        writer.drawText(">>", at: Point(x: rect.maxX - arrowWidth - 40, y: rect.minY + (rect.height - font.size) / 2), font: font, color: .black)
 
         let pageTitle = "\((currentDirectory?.page ?? 0) + 1) / \(currentDirectory?.totalPages ?? 1)"
-        let pageWidth = PixelWriter.defaultFont!.width(of: pageTitle)
+        let pageWidth = font.width(of: pageTitle)
         writer.drawText(pageTitle,
-            at: Point(x: rect.center.x - pageWidth / 2, y: rect.minY + (rect.height - fontSize) / 2),
-            fontSize: fontSize,
+            at: Point(x: rect.center.x - pageWidth / 2, y: rect.minY + (rect.height - font.size) / 2),
+            font: font,
             color: .black
         )
     }
@@ -373,9 +380,9 @@ class FileManagerView {
     }
 }
 
-class PlayerControlView {
-    let writer: PixelWriter
-    var buffer: UnsafeMutableBufferPointer<UInt16> {
+class PlayerControlView<P: Pixel> {
+    let writer: Drawable<P>
+    var buffer: UnsafeMutableBufferPointer<P> {
         return writer.buffer
     }
     var size: Size {
@@ -417,11 +424,11 @@ class PlayerControlView {
     private let briIcon = Icon(center: Point(x: 433, y: 215), icon: Icons.light)
 
     init(size: Size) {
-        let buffer = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: size.width * size.height)
-        self.writer = PixelWriter(buffer: buffer, screenSize: size)
+        let buffer = UnsafeMutableBufferPointer<P>.allocate(capacity: size.width * size.height)
+        self.writer = Drawable(buffer: buffer.baseAddress!, screenSize: size)
     }
 
-    func draw(pause: Bool, volume: Int, brightness: Int) -> UnsafeMutableBufferPointer<UInt16> {
+    func draw(pause: Bool, volume: Int, brightness: Int) -> UnsafeMutableBufferPointer<P> {
         writer.clear(color: .black)
         writer.drawLine(from: .zero, to: Point(x: size.width - 1, y: 0), color: .white)
 
@@ -439,19 +446,19 @@ class PlayerControlView {
         writer.drawBitmap(briPlusButton.icon, at: briPlusButton.offset, color: .white)
         writer.drawBitmap(briIcon.icon, at: briIcon.offset, color: .white)
 
-        let fontSize = 60
+        let font = FontFamily.default.font(size: 60)
         let volumeText = "\(volume)"
-        let volumeWidth = PixelWriter.defaultFont!.width(of: volumeText, fontSize: fontSize)
+        let volumeWidth = font.width(of: volumeText)
         writer.drawText("\(volume)",
-            at: Point(x: 545 - volumeWidth / 2, y: 85 - fontSize / 2),
-            fontSize: fontSize,
+            at: Point(x: 545 - volumeWidth / 2, y: 85 - font.size / 2),
+            font: font,
             color: .white
         )
         let brightnessText = "\(brightness)"
-        let brightnessWidth = PixelWriter.defaultFont!.width(of: brightnessText, fontSize: fontSize)
+        let brightnessWidth = font.width(of: brightnessText)
         writer.drawText("\(brightness)",
-            at: Point(x: 545 - brightnessWidth / 2, y: 215 - fontSize / 2),
-            fontSize: fontSize,
+            at: Point(x: 545 - brightnessWidth / 2, y: 215 - font.size / 2),
+            font: font,
             color: .white
         )
         return buffer

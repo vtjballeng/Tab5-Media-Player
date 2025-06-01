@@ -28,7 +28,7 @@ class M5StackTab5 {
             backlightGpio: .gpio22,
             mipiDsiPhyPowerLdo: (channel: 3, voltageMv: 2500),
             numDataLanes: 2,
-            laneBitRateMbps: 730, // 720*1280 RGB24 60Hz
+            laneBitRateMbps: 870, // 720*1280 RGB24 60Hz
             width: 720,
             height: 1280
         )
@@ -133,6 +133,7 @@ class M5StackTab5 {
         private let io: esp_lcd_panel_io_handle_t
         let panel: esp_lcd_panel_handle_t
         let size: Size
+        var pixels: Int { size.width * size.height }
         let semaphore = Semaphore.createBinary()!
 
         init(
@@ -182,10 +183,10 @@ class M5StackTab5 {
             var dpiConfig = esp_lcd_dpi_panel_config_t(
                 virtual_channel: 0,
                 dpi_clk_src: MIPI_DSI_DPI_CLK_SRC_DEFAULT,
-                dpi_clock_freq_mhz: 60,
-                pixel_format: LCD_COLOR_PIXEL_FORMAT_RGB565,
-                in_color_format: lcd_color_format_t(rawValue: 0),
-                out_color_format: lcd_color_format_t(rawValue: 0),
+                dpi_clock_freq_mhz: 80,
+                pixel_format: LCD_COLOR_PIXEL_FORMAT_RGB888,
+                in_color_format: LCD_COLOR_FMT_RGB888,
+                out_color_format: LCD_COLOR_FMT_RGB888,
                 num_fbs: 1,
                 video_timing: esp_lcd_video_timing_t(
                     h_size: width,
@@ -238,7 +239,7 @@ class M5StackTab5 {
                 return false
             }
             esp_lcd_dpi_panel_register_event_callbacks(panel, &callbacks, Unmanaged.passUnretained(self).toOpaque())
-            semaphore.give()
+            // semaphore.give()
         }
 
         var brightness: Int = 0 {
@@ -247,20 +248,40 @@ class M5StackTab5 {
             }
         }
 
-        var frameBuffer: UnsafeMutableBufferPointer<UInt16> {
+        var frameBuffer: UnsafeMutableBufferPointer<RGB888> {
             get {
                 var fb: UnsafeMutableRawPointer?
                 esp_lcd_dpi_panel_get_first_frame_buffer(panel, &fb)
-                let typedPointer = fb!.bindMemory(to: UInt16.self, capacity: size.width * size.height)
-                return UnsafeMutableBufferPointer<UInt16>(start: typedPointer, count: size.width * size.height)
+                let typedPointer = fb!.bindMemory(to: RGB888.self, capacity: size.width * size.height)
+                return UnsafeMutableBufferPointer<RGB888>(start: typedPointer, count: size.width * size.height)
             }
         }
 
+        class Screen: Drawable<RGB888> {
+            let display: Display
+            init(display: Display) {
+                self.display = display
+                super.init(buffer: display.frameBuffer.baseAddress!, screenSize: display.size)
+            }
+            override func drawBuffer(buffer: UnsafeRawBufferPointer, size: Size) {
+                display.drawBitmap(rect: Rect(origin: .zero, size: size), data: buffer.baseAddress!)
+            }
+            override func flush() {
+                display.drawBitmap(rect: Rect(origin: .zero, size: display.size), data: buffer.baseAddress!)
+            }
+        }
+        var drawable: Drawable<RGB888> {
+            return Screen(display: self)
+        }
+
         func drawBitmap(rect: Rect, data: UnsafeRawPointer, retry: Bool = true) {
-            semaphore.take(timeout: 100)
             for _ in 0..<5 {
                 let result = esp_lcd_panel_draw_bitmap(panel, Int32(rect.minX), Int32(rect.minY), Int32(rect.maxX), Int32(rect.maxY), data)
-                if result == ESP_OK || !retry {
+                if result == ESP_OK {
+                    semaphore.take(timeout: 100)
+                    return
+                }
+                if !retry {
                     break
                 }
                 Task.delay(10)
